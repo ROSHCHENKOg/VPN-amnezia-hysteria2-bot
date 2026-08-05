@@ -135,8 +135,8 @@ async def process_key_name(message: Message, state: FSMContext):
         # 1. Send vpn:// link in code block (tap to copy in Telegram)
         await message.answer(
             f"Ключ \"{key_name}\" готов!\n\n"
-            f"Ссылка для импорта в AmneziaVPN (нажми чтобы скопировать):\n"
-            f"`{vpn_link}`"
+            f"Ссылка для импорта в AmneziaVPN:\n"
+            f"```\n{vpn_link}\n```"
         )
 
         # 2. Send QR code
