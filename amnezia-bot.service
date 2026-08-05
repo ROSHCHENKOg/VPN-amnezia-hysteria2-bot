@@ -1,0 +1,14 @@
+[Unit]
+Description=AmneziaVPN Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/amnezia-bot
+ExecStart=/root/amnezia-bot/venv/bin/python bot.py
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
