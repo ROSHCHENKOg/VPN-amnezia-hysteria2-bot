@@ -8,7 +8,7 @@ import qrcode
 import io
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandObject
-from aiogram.types import Message, BufferedInputFile, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, CopyTextButton
+from aiogram.types import Message, BufferedInputFile, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters.command import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -132,14 +132,11 @@ async def process_key_name(message: Message, state: FSMContext):
         vpn_link = generate_vpn_uri(peer, description=key_name)
         conf = generate_wireguard_config(peer)
 
-        # 1. Send vpn:// link with copy button
-        copy_kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="📋 Скопировать ссылку", copy_text=CopyTextButton(text=vpn_link))
-        ]])
+        # 1. Send vpn:// link in code block (tap to copy in Telegram)
         await message.answer(
             f"Ключ \"{key_name}\" готов!\n\n"
-            f"Нажми кнопку ниже, чтобы скопировать ссылку для импорта в AmneziaVPN:",
-            reply_markup=copy_kb
+            f"Ссылка для импорта в AmneziaVPN (нажми чтобы скопировать):\n"
+            f"`{vpn_link}`"
         )
 
         # 2. Send QR code
