@@ -132,21 +132,24 @@ async def process_key_name(message: Message, state: FSMContext):
         vpn_link = generate_vpn_uri(peer, description=key_name)
         conf = generate_wireguard_config(peer)
 
-        # 1. Send vpn:// link in code block (tap to copy in Telegram)
+        # 1. Send header
         await message.answer(
             f"Ключ \"{key_name}\" готов!\n\n"
-            f"Ссылка для импорта в AmneziaVPN:\n"
-            f"```\n{vpn_link}\n```"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"Дальше код пришлётся отдельным сообщением — просто скопируй его."
         )
 
-        # 2. Send QR code
+        # 2. Send vpn:// link as plain text (separate message = tap to copy)
+        await message.answer(vpn_link)
+
+        # 3. Send QR code
         qr_png = make_qr_png(vpn_link)
         await message.answer_photo(
             BufferedInputFile(qr_png, filename=f"{key_name}.png"),
             caption="QR-код — открой камеру телефона и наведи на код"
         )
 
-        # 3. Send .conf file
+        # 4. Send .conf file
         conf_bytes = conf.encode("utf-8")
         safe_name = key_name.replace(" ", "_").replace("/", "_")
         await message.answer_document(
