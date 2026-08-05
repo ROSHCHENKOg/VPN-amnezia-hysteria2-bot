@@ -21,7 +21,8 @@ from whitelist import (
 )
 from awg_manager import (
     create_peer, remove_peer, get_server_info,
-    get_least_loaded_server, generate_wireguard_config, generate_vpn_uri
+    get_least_loaded_server, get_server_for_user,
+    generate_wireguard_config, generate_vpn_uri
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -206,7 +207,7 @@ async def process_key_name(message: Message, state: FSMContext):
     await message.answer("Генерирую ключ, подожди...")
 
     try:
-        server = get_least_loaded_server()
+        server = get_server_for_user(username)
         if not server:
             await message.answer("Все серверы недоступны. Попробуй позже.")
             return
@@ -401,7 +402,8 @@ async def cb_admin_list(callback: CallbackQuery):
     text = f"Вайтлист ({len(wl)}):\n\n"
     for u in wl:
         count = count_user_keys(u["username"])
-        text += f"@{u['username']} | лимит: {u['key_limit']} | ключей: {count}\n"
+        srv = u.get("assigned_server") or "—"
+        text += f"@{u['username']} | лимит: {u['key_limit']} | ключей: {count} | сервер: {srv}\n"
     text += "\n🔒 Меню:"
     await callback.message.edit_text(text, reply_markup=get_admin_keyboard())
     await callback.answer()
@@ -555,8 +557,15 @@ async def cb_admin_servers(callback: CallbackQuery):
     for server in SERVERS:
         info = get_server_info(server)
         status = "OK" if info["peer_count"] >= 0 else "ERROR"
-        text += f"{info['name']} | {info['host']} | {status} | peers: {info['peer_count']}/{info['max_users']}\n"
-    text += "\n🔒 Меню:"
+        # Count users assigned to this server
+        wl = get_whitelist()
+        users_on_server = sum(1 for u in wl if u.get("assigned_server") == server["name"])
+        text += (
+            f"📍 {info['name']} | {info['host']}\n"
+            f"   Статус: {status} | peers: {info['peer_count']}/{info['max_users']}\n"
+            f"   Юзеров закреплено: {users_on_server}\n\n"
+        )
+    text += "🔒 Меню:"
     await callback.message.edit_text(text, reply_markup=get_admin_keyboard())
     await callback.answer()
 
@@ -604,7 +613,8 @@ async def cmd_list(message: Message):
     text = f"Вайтлист ({len(wl)}):\n\n"
     for u in wl:
         count = count_user_keys(u["username"])
-        text += f"@{u['username']} | лимит: {u['key_limit']} | ключей: {count}\n"
+        srv = u.get("assigned_server") or "—"
+        text += f"@{u['username']} | лимит: {u['key_limit']} | ключей: {count} | сервер: {srv}\n"
     await message.answer(text)
 
 

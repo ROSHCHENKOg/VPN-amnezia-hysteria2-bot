@@ -13,6 +13,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS whitelist (
             username TEXT PRIMARY KEY,
             key_limit INTEGER DEFAULT 3,
+            assigned_server TEXT,
             added_by TEXT,
             added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -34,7 +35,12 @@ def init_db():
     try:
         c.execute("ALTER TABLE keys ADD COLUMN key_name TEXT DEFAULT 'unnamed'")
     except:
-        pass  # Column already exists
+        pass
+    # Migration: add assigned_server column if it doesn't exist
+    try:
+        c.execute("ALTER TABLE whitelist ADD COLUMN assigned_server TEXT")
+    except:
+        pass
     conn.commit()
     conn.close()
 
@@ -76,8 +82,28 @@ def is_in_whitelist(username: str) -> dict | None:
     row = c.fetchone()
     conn.close()
     if row:
-        return {"username": row["username"], "key_limit": row["key_limit"]}
+        return {"username": row["username"], "key_limit": row["key_limit"], "assigned_server": row["assigned_server"]}
     return None
+
+
+def get_assigned_server(username: str) -> str | None:
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT assigned_server FROM whitelist WHERE username = ?", (username.lower(),))
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+
+def set_assigned_server(username: str, server_name: str) -> bool:
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("UPDATE whitelist SET assigned_server = ? WHERE username = ?",
+              (server_name, username.lower()))
+    conn.commit()
+    updated = c.rowcount > 0
+    conn.close()
+    return updated
 
 
 def get_whitelist() -> list[dict]:
@@ -87,7 +113,7 @@ def get_whitelist() -> list[dict]:
     c.execute("SELECT * FROM whitelist ORDER BY username")
     rows = c.fetchall()
     conn.close()
-    return [{"username": r["username"], "key_limit": r["key_limit"]} for r in rows]
+    return [{"username": r["username"], "key_limit": r["key_limit"], "assigned_server": r["assigned_server"]} for r in rows]
 
 
 def count_user_keys(username: str) -> int:

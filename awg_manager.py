@@ -135,16 +135,35 @@ def get_server_info(server: dict) -> dict:
         }
 
 
-def get_least_loaded_server() -> dict | None:
-    """Find the server with the fewest peers"""
+def get_least_loaded_server(exclude_full: bool = True) -> dict | None:
+    """Find the server with the fewest peers. Skip full servers if exclude_full=True."""
     best = None
     best_count = float("inf")
     for server in SERVERS:
         info = get_server_info(server)
-        if info["peer_count"] >= 0 and info["peer_count"] < best_count:
+        if info["peer_count"] < 0:
+            continue
+        if exclude_full and info["peer_count"] >= info["max_users"]:
+            continue
+        if info["peer_count"] < best_count:
             best = server
             best_count = info["peer_count"]
     return best
+
+
+def get_server_for_user(username: str) -> dict | None:
+    """Get the server a user is assigned to, or find the least loaded one for a new user."""
+    from whitelist import get_assigned_server, set_assigned_server
+    assigned = get_assigned_server(username)
+    if assigned:
+        server = next((s for s in SERVERS if s["name"] == assigned), None)
+        if server:
+            return server
+    # New user — find least loaded server
+    server = get_least_loaded_server(exclude_full=True)
+    if server:
+        set_assigned_server(username, server["name"])
+    return server
 
 
 def generate_wireguard_config(peer_info: dict) -> str:
