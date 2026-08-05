@@ -162,3 +162,14 @@ def get_user_keys(username: str) -> list[dict]:
         "public_key": r["public_key"],
         "created_at": r["created_at"]
     } for r in rows]
+
+
+def update_key_limit(username: str, key_limit: int) -> bool:
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("UPDATE whitelist SET key_limit = ? WHERE username = ?",
+              (key_limit, username.lower()))
+    conn.commit()
+    updated = c.rowcount > 0
+    conn.close()
+    return updated
