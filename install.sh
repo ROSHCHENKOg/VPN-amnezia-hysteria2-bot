@@ -44,13 +44,13 @@ echo "Installing packages..."
 apt-get update -qq
 apt-get install -y -qq wireguard-tools qrencode > /dev/null 2>&1
 
-# Install AmneziaWG tools
+# Install AmneziaWG
 if ! command -v awg &> /dev/null; then
     echo "Installing AmneziaWG..."
-    apt-get install -y -qq software-properties-common > /dev/null 2>&1
-    add-apt-repository -y ppa:amnezia/amneziawg > /dev/null 2>&1 || true
+    apt-get install -y -qq software-properties-common python3-launchpadlib gnupg2 linux-headers-$(uname -r) > /dev/null 2>&1
+    add-apt-repository -y ppa:amnezia/ppa > /dev/null 2>&1
     apt-get update -qq
-    apt-get install -y -qq amneziawg-tools > /dev/null 2>&1
+    apt-get install -y -qq amneziawg > /dev/null 2>&1
 fi
 
 if ! command -v awg &> /dev/null; then
