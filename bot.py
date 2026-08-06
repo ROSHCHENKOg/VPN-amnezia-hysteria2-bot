@@ -40,6 +40,7 @@ class AdminAction(StatesGroup):
     waiting_keys_user = State()
     waiting_revoke_user = State()
     waiting_limit_user = State()
+    waiting_give_key_user = State()
 
 
 # --- Helper functions ---
@@ -75,6 +76,7 @@ def get_admin_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="➕ Добавить юзера", callback_data="admin_add")],
         [InlineKeyboardButton(text="👥 Список всех", callback_data="admin_list")],
         [InlineKeyboardButton(text="🔑 Ключи юзера", callback_data="admin_user_keys")],
+        [InlineKeyboardButton(text="🔑 Выдать ключ на сервер", callback_data="admin_give_key")],
         [InlineKeyboardButton(text="❌ Отозвать ключ", callback_data="admin_revoke")],
         [InlineKeyboardButton(text="🔢 Изменить лимит", callback_data="admin_limit")],
         [InlineKeyboardButton(text="📊 Серверы", callback_data="admin_servers")],
@@ -546,6 +548,100 @@ async def process_limit_user(message: Message, state: FSMContext):
             f"@{username} не найден в вайтлисте.",
             reply_markup=get_admin_keyboard()
         )
+    await state.clear()
+
+
+@dp.callback_query(F.data == "admin_give_key")
+async def cb_admin_give_key(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    await callback.message.edit_text("Введи @username и название ключа.\nПример: @vasya iPhone")
+    await state.set_state(AdminAction.waiting_give_key_user)
+    await callback.answer()
+
+
+@dp.message(AdminAction.waiting_give_key_user)
+async def process_give_key_user(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    parts = message.text.strip().split(None, 1)
+    if len(parts) < 2:
+        await message.answer("Нужны @username и название. Пример: @vasya iPhone")
+        await state.clear()
+        return
+    username = parts[0].replace("@", "").lower()
+    key_name = parts[1].strip()
+    # Check user exists in whitelist
+    wl = is_in_whitelist(username)
+    if not wl:
+        await message.answer(f"@{username} не найден в вайтлисте. Сначала добавь через «➕ Добавить юзера».", reply_markup=get_admin_keyboard())
+        await state.clear()
+        return
+    # Check limit
+    current = count_user_keys(username)
+    if current >= wl["key_limit"]:
+        await message.answer(f"У @{username} лимит исчерпан ({current}/{wl['key_limit']}).", reply_markup=get_admin_keyboard())
+        await state.clear()
+        return
+    # Store username and key_name in state, show server choice
+    await state.update_data(give_key_username=username, give_key_name=key_name)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"📍 {s['name']} ({s['host']})", callback_data=f"givekey:{s['name']}")]
+        for s in SERVERS
+    ])
+    await message.answer(f"Выбери сервер для ключа \"{key_name}\" (@{username}):", reply_markup=kb)
+    await state.set_state(None)  # clear text state, wait for callback
+
+
+@dp.callback_query(F.data.startswith("givekey:"))
+async def cb_give_key_on_server(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    server_name = callback.data.split(":", 1)[1]
+    data = await state.get_data()
+    username = data.get("give_key_username")
+    key_name = data.get("give_key_name")
+    if not username or not key_name:
+        await callback.message.edit_text("Ошибка: данные потеряны. Начни заново /admin")
+        await callback.answer()
+        return
+    server = next((s for s in SERVERS if s["name"] == server_name), None)
+    if not server:
+        await callback.message.edit_text("Сервер не найден.")
+        await callback.answer()
+        return
+    await callback.message.edit_text(f"Генерирую ключ \"{key_name}\" на {server_name} для @{username}...")
+    await callback.answer()
+    try:
+        peer = create_peer(server)
+        add_key(username, key_name, peer["server_name"], peer["client_ip"],
+                peer["private_key"], peer["public_key"])
+        # Assign user to this server
+        from whitelist import set_assigned_server
+        set_assigned_server(username, server_name)
+        vpn_link = generate_vpn_uri(peer, description=key_name)
+        conf = generate_wireguard_config(peer)
+        await callback.message.answer(
+            f"Ключ \"{key_name}\" готов для @{username} на {server_name}!\n\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"Дальше код пришлётся отдельным сообщением — скопируй его."
+        )
+        await callback.message.answer(vpn_link)
+        qr_png = make_qr_png(vpn_link)
+        await callback.message.answer_photo(
+            BufferedInputFile(qr_png, filename=f"{key_name}.png"),
+            caption="QR-код — открой камеру телефона и наведи на код"
+        )
+        conf_bytes = conf.encode("utf-8")
+        safe_name = key_name.replace(" ", "_").replace("/", "_")
+        await callback.message.answer_document(
+            BufferedInputFile(conf_bytes, filename=f"{safe_name}.conf"),
+            caption="Файл конфига — можно импортировать в AmneziaVPN как файл"
+        )
+        await callback.message.answer("🔒 Меню:", reply_markup=get_admin_keyboard())
+    except Exception as e:
+        logging.error(f"Error in give_key: {e}")
+        await callback.message.answer(f"Ошибка: {e}", reply_markup=get_admin_keyboard())
     await state.clear()
 
 
