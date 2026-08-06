@@ -54,7 +54,7 @@ if ! command -v awg &> /dev/null; then
 fi
 
 if ! command -v awg &> /dev/null; then
-    echo "ERROR: awg not found. Install amneziawg-tools manually."
+    echo "ERROR: awg not found. Install amneziawg manually: apt install amneziawg"
     exit 1
 fi
 
