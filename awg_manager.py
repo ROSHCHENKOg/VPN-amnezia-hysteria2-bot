@@ -1,6 +1,7 @@
 """
 AmneziaWG manager - creates/removes peers on servers via SSH or locally
 """
+import base64
 import subprocess
 import paramiko
 from config import SERVERS, AWG_PARAMS, VPN_SERVER_IP
@@ -71,6 +72,31 @@ def _get_next_ip(server: dict) -> str:
     raise Exception("No available IPs in subnet")
 
 
+def _config_add_peer(server: dict, pubkey: str, client_ip: str) -> None:
+    """Дописать пира в awg0.conf.
+
+    `awg set` живёт только до перезагрузки. Без записи в конфиг все ключи
+    слетают при первом же ребуте сервера.
+    """
+    block = f"\\n[Peer]\\nPublicKey = {pubkey}\\nAllowedIPs = {client_ip}/32\\n"
+    _run_ssh(server, f"printf '{block}' >> {server['wg_config']}")
+
+
+def _config_remove_peer(server: dict, pubkey: str) -> None:
+    """Убрать секцию [Peer] с этим ключом из awg0.conf."""
+    script = (
+        "import sys\n"
+        f"path = {server['wg_config']!r}\n"
+        f"target = {pubkey!r}\n"
+        "text = open(path).read()\n"
+        "blocks = text.split('[Peer]')\n"
+        "kept = [blocks[0]] + ['[Peer]' + b for b in blocks[1:] if target not in b]\n"
+        "open(path, 'w').write(''.join(kept))\n"
+    )
+    payload = base64.b64encode(script.encode()).decode()
+    _run_ssh(server, f"echo {payload} | base64 -d | python3 -")
+
+
 def create_peer(server: dict) -> dict:
     """
     Generate a new keypair, add peer to server, return client config info.
@@ -88,6 +114,7 @@ def create_peer(server: dict) -> dict:
     interface = server["wg_interface"]
     cmd = f"awg set {interface} peer {pubkey} allowed-ips {client_ip}/32"
     _run_ssh(server, cmd)
+    _config_add_peer(server, pubkey.strip(), client_ip)
 
     return {
         "private_key": privkey.strip(),
@@ -105,6 +132,7 @@ def remove_peer(server: dict, public_key: str) -> bool:
     cmd = f"awg set {interface} peer {public_key} remove"
     try:
         _run_ssh(server, cmd)
+        _config_remove_peer(server, public_key)
         return True
     except Exception as e:
         print(f"Error removing peer: {e}")
@@ -172,6 +200,7 @@ def generate_wireguard_config(peer_info: dict) -> str:
         "[Interface]",
         f"PrivateKey = {peer_info['private_key']}",
         f"Address = {peer_info['client_ip']}/24",
+        "DNS = 1.1.1.1, 8.8.8.8",
         "",
         "[Peer]",
         f"PublicKey = {peer_info['server_public_key']}",

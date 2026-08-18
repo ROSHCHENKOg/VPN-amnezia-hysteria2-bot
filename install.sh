@@ -11,6 +11,9 @@ WG_CONFIG="$WG_DIR/${INTERFACE}.conf"
 PORT=51820
 SUBNET="10.8.0.0/24"
 SERVER_IP="10.8.0.1/24"
+# 1420 = 1500 - 80 на инкапсуляцию. Меньше ставить нельзя: крупные UDP-пакеты
+# (видео по QUIC) не влезут в туннель и будут молча отбрасываться.
+MTU=1420
 
 # AmneziaWG obfuscation params (must match across all servers)
 JC=5
@@ -47,10 +50,13 @@ apt-get install -y -qq wireguard-tools qrencode > /dev/null 2>&1
 # Install AmneziaWG
 if ! command -v awg &> /dev/null; then
     echo "Installing AmneziaWG..."
-    apt-get install -y -qq software-properties-common python3-launchpadlib gnupg2 linux-headers-$(uname -r) > /dev/null 2>&1
+    apt-get install -y -qq software-properties-common python3-launchpadlib gnupg2 \
+        linux-headers-$(uname -r) dkms > /dev/null 2>&1
     add-apt-repository -y ppa:amnezia/ppa > /dev/null 2>&1
     apt-get update -qq
-    apt-get install -y -qq amneziawg > /dev/null 2>&1
+    # amneziawg-dkms обязателен: без него модуль ядра не пересоберётся после
+    # обновления ядра, и VPN отвалится у всех после первой же перезагрузки
+    apt-get install -y -qq amneziawg amneziawg-dkms amneziawg-tools > /dev/null 2>&1
 fi
 
 if ! command -v awg &> /dev/null; then
@@ -77,6 +83,7 @@ cat > "$WG_CONFIG" << EOF
 PrivateKey = $SERVER_PRIVKEY
 Address = $SERVER_IP
 ListenPort = $PORT
+MTU = $MTU
 Jc = $JC
 Jmin = $JMIN
 Jmax = $JMAX
@@ -114,11 +121,17 @@ echo "Starting interface..."
 awg-quick down $INTERFACE 2>/dev/null || true
 awg-quick up $INTERFACE
 
+# Без этого после перезагрузки интерфейс не поднимется
+systemctl enable awg-quick@$INTERFACE > /dev/null 2>&1
+
 # Verify
 echo ""
 echo "=== Verification ==="
 awg show $INTERFACE
 echo ""
+echo "MTU: $(ip link show $INTERFACE | grep -o 'mtu [0-9]*')"
+echo "Autostart: $(systemctl is-enabled awg-quick@$INTERFACE 2>/dev/null)"
+echo "DKMS: $(dkms status 2>/dev/null | grep -c amneziawg) сборок модуля"
 echo "Server public key: $SERVER_PUBKEY"
 echo "Config: $WG_CONFIG"
 echo "Network interface: $NET_IFACE"

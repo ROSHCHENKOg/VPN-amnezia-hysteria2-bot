@@ -6,6 +6,7 @@ import asyncio
 import logging
 import qrcode
 import io
+import html
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message, BufferedInputFile, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
@@ -24,6 +25,7 @@ from awg_manager import (
     get_least_loaded_server, get_server_for_user,
     generate_wireguard_config, generate_vpn_uri
 )
+import hy2
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
@@ -109,23 +111,40 @@ async def cmd_start(message: Message):
 
 # --- Text button handlers (user keyboard) ---
 
-@dp.message(F.text == "🔑 Ключ")
-async def btn_key(message: Message, state: FSMContext):
-    user = message.from_user
-    username = user.username or ""
-    wl = is_in_whitelist(username)
-    if not wl:
+async def ask_protocol(message: Message):
+    if not is_in_whitelist(message.from_user.username or ""):
         await message.answer("У тебя нет доступа к этому боту.")
         return
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🛡 AmneziaWG", callback_data="proto:awg")],
+        [InlineKeyboardButton(text="⚡ Hysteria2", callback_data="proto:hy2")],
+    ])
+    await message.answer("Какой протокол?", reply_markup=kb)
+
+
+@dp.message(F.text == "🔑 Ключ")
+async def btn_key(message: Message):
+    await ask_protocol(message)
+
+
+@dp.callback_query(F.data.startswith("proto:"))
+async def cb_proto(callback: CallbackQuery, state: FSMContext):
+    username = callback.from_user.username or ""
+    wl = is_in_whitelist(username)
+    if not wl:
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    await callback.answer()
     current = count_user_keys(username)
     if current >= wl["key_limit"]:
-        await message.answer(
+        await callback.message.answer(
             f"Ты использовал все ключи ({current}/{wl['key_limit']}).\n"
             f"Обратись к администратору для увеличения лимита."
         )
         return
-    await message.answer("Введи название для ключа (например: iPhone, MacBook, VPN-comp 1):")
+    await state.update_data(protocol=callback.data.split(":", 1)[1])
     await state.set_state(KeyCreation.waiting_for_name)
+    await callback.message.answer("Введи название для ключа (например: iPhone, MacBook, VPN-comp 1):")
 
 
 @dp.message(F.text == "📋 Мои ключи")
@@ -142,7 +161,8 @@ async def btn_mykeys(message: Message):
         return
     text = f"Твои ключи ({len(keys)}/{wl['key_limit']}):\n\n"
     for k in keys:
-        text += f"• {k['key_name']} ({k['server_name']})\n"
+        proto = "Hysteria2" if k["protocol"] == "hy2" else "AmneziaWG"
+        text += f"• {k['key_name']} — {proto}, {k['server_name']}\n"
     await message.answer(text)
 
 
@@ -159,7 +179,9 @@ async def btn_revoke(message: Message):
         await message.answer("У тебя пока нет ключей. Нажми «🔑 Ключ» для получения.")
         return
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"❌ {k['key_name']}", callback_data=f"revoke:{k['id']}:{k['key_name']}")]
+        [InlineKeyboardButton(
+            text=f"❌ {k['key_name']} ({'Hysteria2' if k['protocol'] == 'hy2' else 'AmneziaWG'})",
+            callback_data=f"revoke:{k['id']}:{k['key_name']}")]
         for k in keys
     ])
     await message.answer("Выбери ключ для отзыва:", reply_markup=kb)
@@ -168,22 +190,8 @@ async def btn_revoke(message: Message):
 # --- Command handlers (same logic, for those who type commands) ---
 
 @dp.message(Command("key"))
-async def cmd_key(message: Message, state: FSMContext):
-    user = message.from_user
-    username = user.username or ""
-    wl = is_in_whitelist(username)
-    if not wl:
-        await message.answer("У тебя нет доступа к этому боту.")
-        return
-    current = count_user_keys(username)
-    if current >= wl["key_limit"]:
-        await message.answer(
-            f"Ты использовал все ключи ({current}/{wl['key_limit']}).\n"
-            f"Обратись к администратору для увеличения лимита."
-        )
-        return
-    await message.answer("Введи название для ключа (например: iPhone, MacBook, VPN-comp 1):")
-    await state.set_state(KeyCreation.waiting_for_name)
+async def cmd_key(message: Message):
+    await ask_protocol(message)
 
 
 @dp.message(KeyCreation.waiting_for_name)
@@ -191,6 +199,7 @@ async def process_key_name(message: Message, state: FSMContext):
     user = message.from_user
     username = user.username or ""
     key_name = message.text.strip()
+    protocol = (await state.get_data()).get("protocol", "awg")
 
     if not key_name or len(key_name) > 50:
         await message.answer("Название слишком длинное или пустое. Попробуй ещё раз /key")
@@ -207,6 +216,25 @@ async def process_key_name(message: Message, state: FSMContext):
         return
 
     await message.answer("Генерирую ключ, подожди...")
+
+    if protocol == "hy2":
+        try:
+            server, link = await asyncio.to_thread(hy2.create_key, username, key_name)
+        except Exception as e:
+            logging.error(f"Error creating hy2 key: {e}")
+            await message.answer(f"Ошибка при создании ключа: {e}")
+            return
+        await message.answer(
+            f"Ключ \"{key_name}\" готов — Hysteria2, сервер {server}\n\n"
+            f"Приложение HApp. Добавь конфиг вставкой из буфера, "
+            f"не по нажатию на ссылку."
+        )
+        await message.answer(link)
+        await message.answer_photo(
+            BufferedInputFile(make_qr_png(link), filename=f"{key_name}.png"),
+            caption="QR-код — открой камеру телефона и наведи на код"
+        )
+        return
 
     try:
         server = get_server_for_user(username)
@@ -329,6 +357,11 @@ async def cb_revoke_key(callback: CallbackQuery):
     if not removed:
         await callback.answer("Ключ не найден")
         return
+    if removed.get("protocol") == "hy2":
+        await asyncio.to_thread(hy2.sync)
+        await callback.message.edit_text(f"Ключ \"{key_name}\" отозван, ссылка больше не работает.")
+        await callback.answer("Отозвано")
+        return
     server = next((s for s in SERVERS if s["name"] == removed["server_name"]), None)
     if server:
         try:
@@ -383,6 +416,7 @@ async def process_add_user(message: Message, state: FSMContext):
     username = parts[0].replace("@", "").lower()
     limit = int(parts[1]) if len(parts) > 1 else None
     if add_to_whitelist(username, limit):
+        await asyncio.to_thread(hy2.sync)
         await message.answer(
             f"✅ Добавлен @{username} с лимитом {limit or 'по умолчанию (3)'}",
             reply_markup=get_admin_keyboard()
@@ -679,6 +713,7 @@ async def cmd_add(message: Message, command: CommandObject):
     username = parts[0].replace("@", "").lower()
     limit = int(parts[1]) if len(parts) > 1 else None
     if add_to_whitelist(username, limit):
+        await asyncio.to_thread(hy2.sync)
         await message.answer(f"Добавлен @{username} с лимитом {limit or 'по умолчанию'}")
     else:
         await message.answer("Ошибка при добавлении.")
@@ -693,7 +728,8 @@ async def cmd_remove(message: Message, command: CommandObject):
         return
     username = command.args.replace("@", "").lower()
     if remove_from_whitelist(username):
-        await message.answer(f"Удалён @{username} из вайтлиста")
+        await asyncio.to_thread(hy2.sync)
+        await message.answer(f"Удалён @{username} из вайтлиста, доступ к Hysteria отозван")
     else:
         await message.answer(f"@{username} не найден в вайтлисте")
 

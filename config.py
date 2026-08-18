@@ -28,6 +28,11 @@ AWG_PARAMS = {
     "I1": os.getenv("AWG_I1", "<r 2><b 0x858000010001000000000669636c6f756403636f6d0000010001c00c000100010000105a00044d583737>"),
 }
 
+# Hysteria2
+HY2_OBFS = os.getenv("HY2_OBFS", "")
+HY2_PORT = int(os.getenv("HY2_PORT", "31000"))
+HY2_HOP = os.getenv("HY2_HOP", "20000-30000")
+
 VPN_SUBNET = os.getenv("VPN_SUBNET", "10.8.0.0/24")
 VPN_SERVER_IP = os.getenv("VPN_SERVER_IP", "10.8.0.1")
 DEFAULT_KEY_LIMIT = int(os.getenv("DEFAULT_KEY_LIMIT", "3"))

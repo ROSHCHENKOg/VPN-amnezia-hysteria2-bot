@@ -41,6 +41,11 @@ def init_db():
         c.execute("ALTER TABLE whitelist ADD COLUMN assigned_server TEXT")
     except:
         pass
+    # Migration: protocol per key - 'awg' or 'hy2'
+    try:
+        c.execute("ALTER TABLE keys ADD COLUMN protocol TEXT DEFAULT 'awg'")
+    except:
+        pass
     conn.commit()
     conn.close()
 
@@ -126,13 +131,13 @@ def count_user_keys(username: str) -> int:
 
 
 def add_key(username: str, key_name: str, server_name: str, client_ip: str,
-             private_key: str, public_key: str) -> bool:
+             private_key: str, public_key: str, protocol: str = "awg") -> bool:
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     try:
         c.execute(
-            "INSERT INTO keys (username, key_name, server_name, client_ip, private_key, public_key) VALUES (?, ?, ?, ?, ?, ?)",
-            (username.lower(), key_name, server_name, client_ip, private_key, public_key)
+            "INSERT INTO keys (username, key_name, server_name, client_ip, private_key, public_key, protocol) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (username.lower(), key_name, server_name, client_ip, private_key, public_key, protocol)
         )
         conn.commit()
         return True
@@ -167,7 +172,9 @@ def remove_key(username: str, client_ip: str = None, key_id: int = None,
             "key_name": row["key_name"],
             "server_name": row["server_name"],
             "client_ip": row["client_ip"],
-            "public_key": row["public_key"]
+            "public_key": row["public_key"],
+            "private_key": row["private_key"],
+            "protocol": row["protocol"] or "awg"
         }
     conn.close()
     return None
@@ -186,6 +193,8 @@ def get_user_keys(username: str) -> list[dict]:
         "server_name": r["server_name"],
         "client_ip": r["client_ip"],
         "public_key": r["public_key"],
+        "private_key": r["private_key"],
+        "protocol": r["protocol"] or "awg",
         "created_at": r["created_at"]
     } for r in rows]
 
